@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Murder Mystery Roulette</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 0;
+            padding: 20px;
+            background-color: #1a1a1a;
+            color: #ffffff;
+        }
+        .hidden { 
+            display: none !important;
+        }
+        .game-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #2d2d2d;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.3);
+        }
+        #playerList { 
+            margin: 15px 0;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .player-item { 
+            padding: 15px;
+            background-color: #3d3d3d;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            position: relative;
+            margin: 5px 0;
+        }
+        .player-item.selected {
+            background-color: #ffd700;
+            color: #000000;
+            transform: scale(1.02);
+            box-shadow: 0 0 20px rgba(255, 215, 0, 0.7);
+        }
+        .player-item.eliminated { 
+            color: #ff4444;
+            text-decoration: line-through;
+            opacity: 0.7;
+        }
+        input {
+            padding: 10px;
+            margin: 5px;
+            border: none;
+            border-radius: 5px;
+            background-color: #3d3d3d;
+            color: white;
+            width: 200px;
+        }
+        button { 
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            background-color: #4CAF50;
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 5px;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        .action-button {
+            background-color: #2196F3;
+        }
+        .kill-button {
+            background-color: #ff4444;
+        }
+        .skip-button {
+            background-color: #808080;
+        }
+        #rouletteOverlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(255, 215, 0, 0);
+            z-index: 1000;
+            pointer-events: none;
+            transition: background-color 0.3s ease;
+        }
+        .overlay-active {
+            display: block !important;
+            animation: pulseOverlay 0.5s ease-in-out;
+        }
+        @keyframes pulseOverlay {
+            0% { background-color: rgba(255, 215, 0, 0); }
+            50% { background-color: rgba(255, 215, 0, 0.3); }
+            100% { background-color: rgba(255, 215, 0, 0); }
+        }
+        .roulette-progress {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 10px 20px;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: #ffd700;
+            border-radius: 5px;
+            font-size: 18px;
+            z-index: 1001;
+        }
+        #messageArea {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 15px 30px;
+            background-color: rgba(0, 0, 0, 0.9);
+            color: white;
+            border-radius: 8px;
+            z-index: 1001;
+            transition: all 0.3s ease;
+        }
+        .killer-indicator {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background-color: #ff4444;
+            padding: 10px 20px;
+            border-radius: 5px;
+            color: white;
+            z-index: 1001;
+        }
+        #actionArea {
+            margin-top: 20px;
+            padding: 20px;
+            background-color: #444;
+            border-radius: 8px;
+            border: 2px solid #ffd700;
+        }
+        .action-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .killer-controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div id="joinGame">
+            <h2>Murder Mystery Roulette</h2>
+            <input type="text" id="roomName" placeholder="Enter Room Name">
+            <button onclick="joinRoom()">Join Room</button>
+        </div>
+
+        <div id="enterName" class="hidden">
+            <h2>Enter Your Name</h2>
+            <input type="text" id="playerName" placeholder="Your Name">
+            <button onclick="setName()">Set Name</button>
+        </div>
+
+        <div id="gameArea" class="hidden">
+            <h2>Game Room: <span id="roomDisplay"></span></h2>
+            <div id="startGameArea" class="hidden">
+                <button onclick="startGame()" class="action-button">Start Game</button>
+            </div>
+            <h3>Players:</h3>
+            <div id="playerList"></div>
+            <div id="actionArea" class="hidden">
+                <h3>Make Your Choice</h3>
+                <div id="killerArea" class="hidden">
+                    <div class="killer-controls">
+                        <button onclick="skipTurn()" class="skip-button">Skip Turn</button>
+                        <button onclick="showKillList()" class="kill-button">Eliminate Player</button>
+                    </div>
+                    <div id="killList" class="action-list hidden"></div>
+                </div>
+                <div id="accuseArea" class="hidden">
+                    <h4>Choose who you think is the killer:</h4>
+                    <div id="accuseList" class="action-list"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="rouletteOverlay"></div>
+    <div id="rouletteProgress" class="roulette-progress hidden"></div>
+    <div id="messageArea" class="hidden"></div>
+
+    <script>
+        const socket = io();
+        let currentRoom = '';
+        let playerName = '';
+        let isKiller = false;
+        let isFirstPlayer = false;
+        let rouletteActive = false;
+
+        function showMessage(message, duration = 3000) {
+            const messageArea = document.getElementById('messageArea');
+            messageArea.textContent = message;
+            messageArea.classList.remove('hidden');
+            setTimeout(() => messageArea.classList.add('hidden'), duration);
+        }
+
+        function joinRoom() {
+            const room = document.getElementById('roomName').value.trim();
+            if (room) {
+                socket.emit('joinRoom', { room });
+            }
+        }
+
+        function setName() {
+            const name = document.getElementById('playerName').value.trim();
+            if (name) {
+                playerName = name;
+                socket.emit('setName', { room: currentRoom, name });
+                document.getElementById('enterName').classList.add('hidden');
+                document.getElementById('gameArea').classList.remove('hidden');
+            }
+        }
+
+        function startGame() {
+            if (isFirstPlayer) {
+                socket.emit('startGame', { room: currentRoom });
+                document.getElementById('startGameArea').classList.add('hidden');
+            }
+        }
+
+        function skipTurn() {
+            socket.emit('skipTurn', { room: currentRoom });
+            document.getElementById('actionArea').classList.add('hidden');
+        }
+
+        function showKillList() {
+            document.getElementById('killList').classList.remove('hidden');
+        }
+
+        function accusePlayer(targetName) {
+            socket.emit('accusation', { room: currentRoom, target: targetName });
+            document.getElementById('actionArea').classList.add('hidden');
+        }
+
+        function eliminatePlayer(targetName) {
+            socket.emit('elimination', { room: currentRoom, target: targetName });
+            document.getElementById('actionArea').classList.add('hidden');
+        }
+
+        socket.on('roomJoined', (room) => {
+            currentRoom = room;
+            document.getElementById('joinGame').classList.add('hidden');
+            document.getElementById('enterName').classList.remove('hidden');
+            document.getElementById('roomDisplay').textContent = room;
+        });
+
+        socket.on('error', (data) => {
+            showMessage('Error: ' + data.message);
+        });
+
+        socket.on('systemMessage', (message) => {
+            showMessage(message, 4000);
+        });
+
+        socket.on('updatePlayers', (data) => {
+            const playerList = document.getElementById('playerList');
+            playerList.innerHTML = '';
+            data.players.forEach(player => {
+                const playerDiv = document.createElement('div');
+                playerDiv.textContent = player.name;
+                playerDiv.classList.add('player-item');
+                if (player.eliminated) {
+                    playerDiv.classList.add('eliminated');
+                }
+                if (player.selected) {
+                    playerDiv.classList.add('selected');
+                }
+                playerList.appendChild(playerDiv);
+            });
+        });
+
+        socket.on('youAreKiller', () => {
+            isKiller = true;
+            showMessage('🔪 You are the killer! Stay undetected!', 5000);
+            
+            // Add killer indicator if it doesn't exist
+            if (!document.querySelector('.killer-indicator')) {
+                const killerIndicator = document.createElement('div');
+                killerIndicator.className = 'killer-indicator';
+                killerIndicator.textContent = '🔪 You are the Killer';
+                document.body.appendChild(killerIndicator);
+            }
+        });
+
+        socket.on('showStartButton', () => {
+            isFirstPlayer = true;
+            document.getElementById('startGameArea').classList.remove('hidden');
+        });
+
+        socket.on('gameStarted', () => {
+            showMessage('Game is starting!', 2000);
+        });
+
+        socket.on('rouletteStarting', (data) => {
+            rouletteActive = true;
+            document.getElementById('rouletteProgress').classList.remove('hidden');
+            showMessage('Roulette is spinning...', 2000);
+        });
+
+        socket.on('rouletteUpdate', (data) => {
+            // Clear previous selection
+            document.querySelectorAll('.player-item').forEach(item => {
+                item.classList.remove('selected');
+            });
+
+            // Update current selection
+            document.querySelectorAll('.player-item').forEach(item => {
+                if (item.textContent.includes(data.selectedName)) {
+                    item.classList.add('selected');
+                }
+            });
+
+            // Update progress
+            const progress = document.getElementById('rouletteProgress');
+            progress.textContent = `Rotation: ${data.currentRotation + 1}/${data.totalRotations}`;
+        });
+
+        socket.on('rouletteStop', (data) => {
+            rouletteActive = false;
+            document.getElementById('rouletteProgress').classList.add('hidden');
+
+            // Ensure final selection is highlighted
+            document.querySelectorAll('.player-item').forEach(item => {
+                item.classList.remove('selected');
+                if (item.textContent.includes(data.selectedName)) {
+                    item.classList.add('selected');
+                }
+            });
+
+            const isSelected = data.selectedName === playerName;
+            
+            if (isSelected) {
+                if (isKiller) {
+                    showMessage('You were selected! Choose someone to eliminate or skip your turn', 5000);
+                    document.getElementById('actionArea').classList.remove('hidden');
+                    document.getElementById('killerArea').classList.remove('hidden');
+                    document.getElementById('accuseArea').classList.add('hidden');
+                } else {
+                    showMessage('You were selected! Choose who you think is the killer', 5000);
+                    document.getElementById('actionArea').classList.remove('hidden');
+                    document.getElementById('killerArea').classList.add('hidden');
+                    document.getElementById('accuseArea').classList.remove('hidden');
+                }
+                updateActionLists();
+            } else {
+                showMessage(`Roulette stopped on: ${data.selectedName}!`, 4000);
+            }
+        });
+
+        function updateActionLists() {
+            const playerItems = document.querySelectorAll('.player-item');
+            const accuseList = document.getElementById('accuseList');
+            const killList = document.getElementById('killList');
+            
+            accuseList.innerHTML = '';
+            killList.innerHTML = '';
+            
+            playerItems.forEach(playerDiv => {
+                if (!playerDiv.classList.contains('eliminated') && 
+                    playerDiv.textContent.trim() !== playerName) {
+                    const targetName = playerDiv.textContent.trim();
+                    if (isKiller) {
+                        const killButton = document.createElement('button');
+                        killButton.textContent = targetName;
+                        killButton.classList.add('kill-button');
+                        killButton.onclick = () => eliminatePlayer(targetName);
+                        killList.appendChild(killButton);
+                    } else {
+                        const accuseButton = document.createElement('button');
+                        accuseButton.textContent = targetName;
+                        accuseButton.classList.add('action-button');
+                        accuseButton.onclick = () => accusePlayer(targetName);
+                        accuseList.appendChild(accuseButton);
+                    }
+                }
+            });
+        }
+
+        socket.on('playerEliminated', (data) => {
+            showMessage(`${data.name} has been eliminated! ${data.remaining} players remaining.`, 3000);
+        });
+
+        socket.on('gameOver', (winner) => {
+            showMessage(`Game Over! ${winner} wins!`, 5000);
+            setTimeout(() => location.reload(), 5000);
+        });
+    </script>
+</body>
+</html>
